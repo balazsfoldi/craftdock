@@ -1,0 +1,45 @@
+services:
+  manager:
+    build:
+      context: ..
+      dockerfile: apps/manager/Dockerfile
+    environment:
+      NODE_ENV: development
+      MANAGER_HOST: 0.0.0.0
+      MANAGER_PORT: 4000
+      WORKER_ID: ${WORKER_ID:?Set WORKER_ID in the project .env file}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN in the project .env file}
+      HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-10000}
+      WORKER_TIMEOUT_MS: ${WORKER_TIMEOUT_MS:-45000}
+      HEARTBEAT_SWEEP_INTERVAL_MS: 5000
+      LOG_LEVEL: info
+    ports:
+      - '127.0.0.1:${MANAGER_PORT:-4000}:4000'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: apps/agent/Dockerfile
+    environment:
+      NODE_ENV: development
+      MANAGER_WS_URL: ws://manager:4000/api/v1/agent
+      WORKER_ID: ${WORKER_ID:?Set WORKER_ID in the project .env file}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN in the project .env file}
+      RECONNECT_BASE_DELAY_MS: 1000
+      RECONNECT_MAX_DELAY_MS: 30000
+      LOG_LEVEL: info
+    depends_on:
+      manager:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,26 @@
+services:
+  manager:
+    platform: linux/arm64
+    build:
+      context: ..
+      dockerfile: apps/manager/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      MANAGER_HOST: 0.0.0.0
+      MANAGER_PORT: 4000
+      HEARTBEAT_SWEEP_INTERVAL_MS: 5000
+    ports:
+      - '127.0.0.1:4000:4000'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
