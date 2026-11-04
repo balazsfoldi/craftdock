@@ -1,0 +1,9 @@
+services:
+  agent:
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: apps/agent/Dockerfile
+    env_file:
+      - ../apps/agent/.env
+    restart: unless-stopped
