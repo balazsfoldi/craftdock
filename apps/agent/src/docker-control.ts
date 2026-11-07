@@ -60,7 +60,9 @@ export interface DockerCommandResult {
     | 'IMAGE_PULL_FAILED'
     | 'PORT_IN_USE'
     | 'OPERATION_FAILED'
-    | 'SERVER_NOT_RUNNING';
+    | 'SERVER_NOT_RUNNING'
+    | 'CONSOLE_UNAVAILABLE'
+    | 'COMMAND_RESULT_UNKNOWN';
 }
 
 export class DockerControl {
@@ -133,6 +135,10 @@ export class DockerControl {
         return { status: 'SUCCEEDED', observedState: 'RUNNING' };
       }
 
+      if (command.action === 'server.console') {
+        return await this.sendConsoleCommand(command.serverId, command.command);
+      }
+
       if (command.action === 'server.delete') {
         return await this.deleteServer(command.serverId, command.deleteWorld);
       }
@@ -149,9 +155,56 @@ export class DockerControl {
       }
       return { status: 'SUCCEEDED', observedState: 'STOPPED' };
     } catch (error) {
-      const errorCode = classifyDockerError(error) ?? 'OPERATION_FAILED';
+      const errorCode =
+        command.action === 'server.console' &&
+        error instanceof Error &&
+        error.message === 'CONSOLE_WRITE_TIMEOUT'
+          ? 'COMMAND_RESULT_UNKNOWN'
+          : (classifyDockerError(error) ?? 'OPERATION_FAILED');
       return { status: 'FAILED', observedState: 'UNKNOWN', errorCode };
     }
+  }
+
+  private async sendConsoleCommand(
+    serverId: string,
+    command: string,
+  ): Promise<DockerCommandResult> {
+    const container = await this.findServerContainer(serverId);
+    if (!container) {
+      return { status: 'FAILED', observedState: 'STOPPED', errorCode: 'SERVER_NOT_RUNNING' };
+    }
+    const inspection = await container.inspect();
+    assertManagedContainer(inspection, serverId);
+    if (!inspection.State.Running) {
+      return { status: 'FAILED', observedState: 'STOPPED', errorCode: 'SERVER_NOT_RUNNING' };
+    }
+    if (!inspection.Config.OpenStdin || !inspection.Config.AttachStdin) {
+      return { status: 'FAILED', observedState: 'RUNNING', errorCode: 'CONSOLE_UNAVAILABLE' };
+    }
+    const stream = await container.attach({
+      stream: true,
+      stdin: true,
+      stdout: false,
+      stderr: false,
+      logs: false,
+    });
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        (stream as typeof stream & { destroy?: () => void }).destroy?.();
+        reject(new Error('CONSOLE_WRITE_TIMEOUT'));
+      }, 10_000);
+      stream.once('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      stream.write(`${command}\n`, (error?: Error | null) => {
+        clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    stream.end();
+    return { status: 'SUCCEEDED', observedState: 'RUNNING' };
   }
 
   private async deleteServer(serverId: string, deleteWorld: boolean): Promise<DockerCommandResult> {
@@ -221,7 +274,8 @@ export class DockerControl {
         throw new Error('CONTAINER_NAME_MISMATCH');
       }
       const mappedPort = inspection.HostConfig.PortBindings['25565/tcp']?.[0]?.HostPort;
-      if (mappedPort !== String(server.hostPort)) {
+      const hasConsoleInput = inspection.Config.OpenStdin && inspection.Config.AttachStdin;
+      if (mappedPort !== String(server.hostPort) || !hasConsoleInput) {
         const volumeName = `craftdock-server-${serverId}`;
         if (
           !inspection.Mounts.some(
@@ -263,8 +317,11 @@ export class DockerControl {
       Entrypoint: ['java'],
       Cmd: [`-Xmx${Math.floor(server.memoryMb * 0.8)}M`, '-jar', '/data/server.jar', 'nogui'],
       Tty: false,
+      OpenStdin: true,
+      StdinOnce: false,
       AttachStdout: true,
       AttachStderr: true,
+      AttachStdin: true,
       Labels: { [MANAGED_LABEL]: 'true', [SERVER_ID_LABEL]: serverId },
       ExposedPorts: { '25565/tcp': {} },
       HostConfig: {

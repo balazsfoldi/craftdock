@@ -70,7 +70,7 @@ export interface ControlPlane {
   updateUser(userId: string, input: UpdateUserInput, actorId: string): Promise<UserSnapshot>;
   updateOwnPassword(userId: string, passwordHash: string): Promise<void>;
   listAuditEvents(limit?: number): Promise<AuditEventSnapshot[]>;
-  listServers(workerId: string): Promise<ServerSnapshot[]>;
+  listServers(workerId: string, userId: string, isAdmin: boolean): Promise<ServerSnapshot[]>;
   getServer(serverId: string): Promise<ServerSnapshot | null>;
   getServerMemberRole(serverId: string, userId: string): Promise<ServerRole | null>;
   listServerMembers(serverId: string): Promise<ServerMemberSnapshot[]>;
@@ -187,6 +187,10 @@ export class PostgresControlPlane implements ControlPlane {
       new URL('../migrations/002-server-delete.sql', import.meta.url),
       'utf8',
     );
+    const multiUserMigration = await readFile(
+      new URL('../migrations/003-multi-user-console.sql', import.meta.url),
+      'utf8',
+    );
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -202,12 +206,47 @@ export class PostgresControlPlane implements ControlPlane {
         initialApplied = Boolean(initial.rowCount);
       }
       if (!initialApplied) await client.query(initialMigration);
-      const migration = await client.query<{ version: string }>(
+      const legacyMultiUserMigration = await client.query(
+        'SELECT version FROM schema_migrations WHERE version = $1',
+        ['002-multi-user'],
+      );
+      const deleteSchema = await client.query(
         'SELECT version FROM schema_migrations WHERE version = $1',
         ['002-server-delete'],
       );
-      if (!migration.rowCount) {
+      if (!deleteSchema.rowCount && !legacyMultiUserMigration.rowCount) {
         await client.query(deleteMigration);
+      }
+      const multiUserSchema = await client.query(
+        'SELECT version FROM schema_migrations WHERE version = $1',
+        ['003-multi-user-console'],
+      );
+      if (!multiUserSchema.rowCount && !legacyMultiUserMigration.rowCount) {
+        await client.query(multiUserMigration);
+      } else if (legacyMultiUserMigration.rowCount && !multiUserSchema.rowCount) {
+        await client.query(
+          "INSERT INTO schema_migrations(version) VALUES ('003-multi-user-console') ON CONFLICT (version) DO NOTHING",
+        );
+      }
+      const interruptedConsoleCommands = await client.query<{
+        id: string;
+        server_id: string;
+        requested_by: string;
+      }>(
+        `UPDATE operations SET status = 'FAILED', error_code = 'COMMAND_RESULT_UNKNOWN',
+                               finished_at = now(), payload = '{}'::jsonb
+         WHERE type = 'CONSOLE' AND status = 'RUNNING'
+         RETURNING id, server_id, requested_by`,
+      );
+      for (const operation of interruptedConsoleCommands.rows) {
+        await insertAudit(
+          client,
+          'server.console.result_unknown',
+          operation.requested_by,
+          'server',
+          operation.server_id,
+          { operationId: operation.id },
+        );
       }
       await client.query(
         `INSERT INTO workers (id, name, status) VALUES ($1, 'Windows worker', 'OFFLINE')
@@ -219,8 +258,8 @@ export class PostgresControlPlane implements ControlPlane {
         [workerId],
       );
       await client.query(
-        `INSERT INTO users (id, email, password_hash, role)
-         VALUES ($1, $2, $3, 'ADMIN')
+        `INSERT INTO users (id, email, password_hash, role, status)
+         VALUES ($1, $2, $3, 'ADMIN', 'ACTIVE')
          ON CONFLICT (email) DO NOTHING`,
         [randomUUID(), adminEmail.toLowerCase(), adminPasswordHash],
       );
@@ -243,9 +282,10 @@ export class PostgresControlPlane implements ControlPlane {
       email: string;
       password_hash: string;
       role: PlatformRole;
+      status: UserSnapshot['status'];
       created_at: Date;
     }>(
-      'SELECT id, email, password_hash, role, created_at FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, role, status, created_at FROM users WHERE email = $1',
       [email.toLowerCase()],
     );
     const row = result.rows[0];
@@ -255,7 +295,7 @@ export class PostgresControlPlane implements ControlPlane {
           email: row.email,
           passwordHash: row.password_hash,
           role: row.role,
-          status: 'ACTIVE',
+          status: row.status,
           createdAt: row.created_at.toISOString(),
         }
       : null;
@@ -435,12 +475,19 @@ export class PostgresControlPlane implements ControlPlane {
     }));
   }
 
-  async listServers(workerId: string): Promise<ServerSnapshot[]> {
+  async listServers(workerId: string, userId: string, isAdmin: boolean): Promise<ServerSnapshot[]> {
     const result = await this.pool.query<ServerRow>(
-      `SELECT id, name, minecraft_version, desired_state, observed_state, worker_id,
-              host_port, memory_mb, cpu_limit, created_at, updated_at, last_observed_at
-       FROM servers WHERE worker_id = $1 AND deleted_at IS NULL ORDER BY created_at`,
-      [workerId],
+      `SELECT s.id, s.name, s.minecraft_version, s.desired_state, s.observed_state, s.worker_id,
+              s.host_port, s.memory_mb, s.cpu_limit, s.created_at, s.updated_at, s.last_observed_at,
+              membership.role AS member_role
+       FROM servers s LEFT JOIN server_members membership
+         ON membership.server_id = s.id AND membership.user_id = $2
+       WHERE s.worker_id = $1 AND s.deleted_at IS NULL
+         AND ($3::boolean OR EXISTS (
+           SELECT 1 FROM server_members m WHERE m.server_id = s.id AND m.user_id = $2
+         ))
+       ORDER BY s.created_at`,
+      [workerId, userId, isAdmin],
     );
     return result.rows.map(toServerSnapshot);
   }
@@ -625,6 +672,11 @@ export class PostgresControlPlane implements ControlPlane {
           input.cpuLimit,
         ],
       );
+      await client.query(
+        `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'OWNER')
+         ON CONFLICT (server_id, user_id) DO NOTHING`,
+        [serverId, adminId],
+      );
       const operationId = randomUUID();
       const insertedOperation = await client.query<OperationRow>(
         `INSERT INTO operations (id, server_id, type, idempotency_key, status, payload, requested_by)
@@ -713,7 +765,7 @@ export class PostgresControlPlane implements ControlPlane {
     return this.transaction(async (client) => {
       const duplicate = await client.query<OperationRow>(
         `SELECT id, server_id, type, idempotency_key, status, error_code, created_at,
-                started_at, finished_at FROM operations WHERE idempotency_key = $1`,
+                started_at, finished_at, result FROM operations WHERE idempotency_key = $1`,
         [idempotencyKey],
       );
       if (duplicate.rows[0]) {
@@ -767,7 +819,7 @@ export class PostgresControlPlane implements ControlPlane {
     return this.transaction(async (client) => {
       const duplicate = await client.query<OperationRow>(
         `SELECT id, server_id, type, idempotency_key, status, error_code, created_at,
-                started_at, finished_at FROM operations WHERE idempotency_key = $1`,
+                started_at, finished_at, result FROM operations WHERE idempotency_key = $1`,
         [idempotencyKey],
       );
       if (duplicate.rows[0]) {
@@ -802,8 +854,25 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   async getOperation(operationId: string): Promise<OperationSnapshot | null> {
+    const timedOut = await this.pool.query<{ server_id: string; requested_by: string }>(
+      `UPDATE operations SET status = 'FAILED', error_code = 'COMMAND_RESULT_UNKNOWN',
+                             finished_at = now(), payload = '{}'::jsonb
+       WHERE id = $1 AND type = 'CONSOLE' AND status = 'RUNNING'
+         AND started_at < now() - interval '30 seconds'
+       RETURNING server_id, requested_by`,
+      [operationId],
+    );
+    if (timedOut.rows[0]) {
+      await this.recordAudit(
+        'server.console.result_unknown',
+        timedOut.rows[0].requested_by,
+        'server',
+        timedOut.rows[0].server_id,
+        { operationId },
+      );
+    }
     const result = await this.pool.query<OperationRow>(
-      `SELECT id, server_id, type, idempotency_key, status, error_code, created_at, started_at, finished_at
+      `SELECT id, server_id, type, idempotency_key, status, error_code, created_at, started_at, finished_at, result
        FROM operations WHERE id = $1`,
       [operationId],
     );
@@ -813,7 +882,7 @@ export class PostgresControlPlane implements ControlPlane {
 
   async listOperations(serverId: string): Promise<OperationSnapshot[]> {
     const result = await this.pool.query<OperationRow>(
-      `SELECT id, server_id, type, idempotency_key, status, error_code, created_at, started_at, finished_at
+      `SELECT id, server_id, type, idempotency_key, status, error_code, created_at, started_at, finished_at, result
        FROM operations WHERE server_id = $1 ORDER BY created_at DESC LIMIT 100`,
       [serverId],
     );
@@ -825,14 +894,14 @@ export class PostgresControlPlane implements ControlPlane {
     replayRunning = false,
   ): Promise<OperationWithCommand[]> {
     const result = await this.pool.query<OperationRow & ServerRow>(
-      `SELECT o.id, o.server_id, o.type, o.idempotency_key, o.status, o.error_code, o.payload,
+      `SELECT o.id, o.server_id, o.type, o.idempotency_key, o.status, o.error_code, o.payload, o.result,
               o.created_at, o.started_at, o.finished_at,
               s.name, s.minecraft_version, s.desired_state, s.observed_state, s.worker_id,
               s.host_port, s.memory_mb, s.cpu_limit, s.created_at AS server_created_at,
               s.updated_at, s.last_observed_at
        FROM operations o JOIN servers s ON s.id = o.server_id
        WHERE s.worker_id = $1 AND s.deleted_at IS NULL
-          AND (o.status = 'QUEUED' OR ($2::boolean AND o.status = 'RUNNING'))
+         AND (o.status = 'QUEUED' OR ($2::boolean AND o.status = 'RUNNING' AND o.type <> 'CONSOLE'))
        ORDER BY o.created_at`,
       [workerId, replayRunning],
     );
@@ -847,6 +916,7 @@ export class PostgresControlPlane implements ControlPlane {
         created_at: row.created_at,
         started_at: row.started_at,
         finished_at: row.finished_at,
+        ...(row.result === undefined ? {} : { result: row.result }),
       });
       const commandBase = {
         ...createMessageMetadata(),
@@ -880,11 +950,17 @@ export class PostgresControlPlane implements ControlPlane {
               })
             : row.type === 'STOP'
               ? ManagerCommandSchema.parse({ ...commandBase, action: 'server.stop' })
-              : ManagerCommandSchema.parse({
-                  ...commandBase,
-                  action: 'server.delete',
-                  deleteWorld: row.payload?.deleteWorld === true,
-                });
+              : row.type === 'DELETE'
+                ? ManagerCommandSchema.parse({
+                    ...commandBase,
+                    action: 'server.delete',
+                    deleteWorld: row.payload?.deleteWorld === true,
+                  })
+                : ManagerCommandSchema.parse({
+                    ...commandBase,
+                    action: 'server.console',
+                    command: row.payload?.command ?? '',
+                  });
       return { operation, command };
     });
   }
@@ -903,6 +979,7 @@ export class PostgresControlPlane implements ControlPlane {
       succeeded: boolean;
       observedState: 'STOPPED' | 'RUNNING' | 'UNKNOWN';
       errorCode?: string;
+      consoleOutput?: string;
     },
   ): Promise<void> {
     await this.transaction(async (client) => {
@@ -971,12 +1048,14 @@ export class PostgresControlPlane implements ControlPlane {
           ? 'PORT_RANGE_EXHAUSTED'
           : (result.errorCode ?? null);
       const completed = await client.query(
-        `UPDATE operations SET status = $2, error_code = $3, finished_at = now()
+        `UPDATE operations SET status = $2, error_code = $3, finished_at = now(), result = $4::jsonb,
+                               payload = CASE WHEN type = 'CONSOLE' THEN '{}'::jsonb ELSE payload END
          WHERE id = $1 AND status IN ('QUEUED', 'RUNNING')`,
         [
           operationId,
           result.succeeded ? 'SUCCEEDED' : 'FAILED',
           finalErrorCode,
+          JSON.stringify(result.consoleOutput ? { consoleOutput: result.consoleOutput } : {}),
         ],
       );
       if (!completed.rowCount) {
@@ -989,7 +1068,7 @@ export class PostgresControlPlane implements ControlPlane {
            WHERE id = $1 AND deleted_at IS NULL`,
           [row.server_id],
         );
-      } else {
+      } else if (row.type !== 'CONSOLE' || result.succeeded) {
         const observedState = result.succeeded ? result.observedState : 'ERROR';
         await client.query(
           'UPDATE servers SET observed_state = $2, last_observed_at = now(), updated_at = now() WHERE id = $1',
@@ -1030,7 +1109,7 @@ export class PostgresControlPlane implements ControlPlane {
         [workerId],
       );
       const admin = await client.query<{ id: string }>(
-        "SELECT id FROM users WHERE role = 'ADMIN' ORDER BY created_at LIMIT 1",
+        "SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE' ORDER BY created_at LIMIT 1",
       );
       const adminId = admin.rows[0]?.id;
       if (!adminId) {
@@ -1097,6 +1176,27 @@ export class PostgresControlPlane implements ControlPlane {
         "UPDATE servers SET observed_state = 'UNKNOWN', updated_at = now() WHERE worker_id = $1 AND deleted_at IS NULL",
         [workerId],
       );
+      const interrupted = await this.pool.query<{
+        id: string;
+        server_id: string;
+        requested_by: string;
+      }>(
+        `UPDATE operations o SET status = 'FAILED', error_code = 'COMMAND_RESULT_UNKNOWN',
+                                 finished_at = now(), payload = '{}'::jsonb
+         FROM servers s WHERE o.server_id = s.id AND s.worker_id = $1
+           AND o.type = 'CONSOLE' AND o.status = 'RUNNING'
+         RETURNING o.id, o.server_id, o.requested_by`,
+        [workerId],
+      );
+      for (const operation of interrupted.rows) {
+        await this.recordAudit(
+          'server.console.result_unknown',
+          operation.requested_by,
+          'server',
+          operation.server_id,
+          { operationId: operation.id },
+        );
+      }
     }
   }
 

@@ -212,7 +212,7 @@ export function runAgentSession(
         type: 'agent.authenticate',
         workerId: config.workerId,
         credential: config.workerToken,
-        agentVersion: '0.1.0',
+        agentVersion: '0.2.0',
         capabilities: readRuntimeCapabilities(),
       });
       socket.send(JSON.stringify(authentication));
@@ -262,7 +262,7 @@ export function runAgentSession(
           authTimer = null;
         }
         markConnected();
-        logger.info({ workerId: config.workerId, agentVersion: '0.1.0' }, 'Connected to Manager');
+        logger.info({ workerId: config.workerId, agentVersion: '0.2.0' }, 'Connected to Manager');
         heartbeatTimer = setInterval(sendHeartbeat, result.data.heartbeatIntervalMs);
         sendHeartbeat();
         void sendSnapshot().catch((error: unknown) => {

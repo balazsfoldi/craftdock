@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 const TimestampSchema = z.string().datetime({ offset: false });
 const MessageIdSchema = z.string().uuid();
@@ -107,6 +107,18 @@ export const ManagerCommandSchema = z.discriminatedUnion('action', [
       deleteWorld: z.boolean(),
     })
     .strict(),
+  z
+    .object({
+      ...ManagerCommandBase,
+      action: z.literal('server.console'),
+      command: z
+        .string()
+        .trim()
+        .min(1)
+        .max(512)
+        .refine((value) => !/[\u0000-\u001f\u007f]/.test(value)),
+    })
+    .strict(),
 ]);
 
 export const AgentCommandAckSchema = z
@@ -126,6 +138,7 @@ export const AgentCommandResultSchema = z
     operationId: MessageIdSchema,
     status: z.enum(['SUCCEEDED', 'FAILED']),
     observedState: z.enum(['STOPPED', 'RUNNING', 'UNKNOWN']),
+    consoleOutput: z.string().max(4_000).optional(),
     errorCode: z
       .enum([
         'VALIDATION_FAILED',
@@ -134,6 +147,8 @@ export const AgentCommandResultSchema = z
         'PORT_IN_USE',
         'OPERATION_FAILED',
         'SERVER_NOT_RUNNING',
+        'CONSOLE_UNAVAILABLE',
+        'COMMAND_RESULT_UNKNOWN',
       ])
       .optional(),
   })

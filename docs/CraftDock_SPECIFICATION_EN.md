@@ -1,6 +1,6 @@
 # CraftDock — Technical Specification
 
-**Version:** 1.1 (M1 implementation scope)
+**Version:** 1.2 (M1/M2 implementation scope)
 **Date:** November 5, 2026
 **Status:** Approved design baseline with accepted M0/M1/M2 decisions.
 
@@ -167,7 +167,7 @@ Mutating operations return `202 Accepted` with an `operationId`. Clients observe
 
 Commands use versioned schemas. After reconnecting, the manager and Agent reconcile operations and observed Docker state using container labels. Heartbeats do not replace actual container inspection.
 
-The version 2 Agent protocol adds the fixed `server.delete` action. The Agent removes only the validated CraftDock server container and retains its named world volume by default. It never invokes a shell or accepts arbitrary Docker options.
+The version 2 Agent protocol adds the fixed `server.delete` action. M2 adds `server.console` in protocol version 3. Console commands are single-line Minecraft input, limited to 512 characters, and are authorized by server role and recorded in the audit log. The Agent writes the command only to the stdin of the validated CraftDock Java server process; it never invokes a shell or accepts arbitrary Docker options. Existing M1 server containers are recreated on a later start to enable stdin while retaining their named world volume. A console operation with an uncertain result after a Manager or Agent disconnect is marked `COMMAND_RESULT_UNKNOWN` and is not replayed, because Minecraft console commands may not be idempotent.
 
 ## 12. Backup and Restore
 

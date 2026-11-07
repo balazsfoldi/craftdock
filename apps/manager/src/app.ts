@@ -127,6 +127,9 @@ export function buildManagerApp(
       if (active.socket.readyState !== active.socket.OPEN) {
         continue;
       }
+      if (entry.command.action === 'server.console') {
+        await controlPlane.markOperationStarted(entry.operation.id);
+      }
       sendMessage(active.socket, entry.command);
       dispatchedOperations.add(entry.operation.id);
     }
@@ -343,6 +346,7 @@ export function buildManagerApp(
               await controlPlane.completeOperation(message.operationId, {
                 succeeded: message.status === 'SUCCEEDED',
                 observedState: message.observedState,
+                ...(message.consoleOutput ? { consoleOutput: message.consoleOutput } : {}),
                 ...(message.errorCode ? { errorCode: message.errorCode } : {}),
               });
               dispatchedOperations.delete(message.operationId);
