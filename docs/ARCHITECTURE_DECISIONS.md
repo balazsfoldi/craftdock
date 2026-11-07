@@ -14,9 +14,10 @@ Record consequential choices as ADRs in `docs/adr/NNNN-short-title.md`.
 - Manager–Agent communication is outbound WebSocket; production Agent connections use TLS/WSS. Local M0 Compose may use `ws://` on its private network.
 - M0 Agent authentication uses a high-entropy, per-worker shared token from protected environment configuration. Rotation updates both services and restarts them. See [ADR 0001](adr/0001-agent-authentication.md).
 - M0 proves connectivity, heartbeat, offline detection, status reporting, and reconnection. It does not access Docker or launch containers; defer that work until a separately reviewed milestone. See [ADR 0002](adr/0002-m0-docker-scope.md).
+- M1 gives only the trusted Windows Agent container a local `/var/run/docker.sock` bind mount. The Docker API is not published on a network; the Agent exposes only validated, allowlisted CraftDock server operations. See [ADR 0003](adr/0003-agent-docker-access.md).
 
 ## Decisions requiring validation
-- Docker Desktop's supported, secure socket access from the Linux-containerized agent.
+- Verify local Docker socket access and permissions from the Linux-containerized Agent; validate deletion and the complete operation allowlist on Windows Docker Desktop (ADR 0003).
 - Production reverse-proxy TLS/WSS termination and the operational token-rotation procedure.
 - Storage engine and durable worker identity for control-plane restarts.
 - Modpack acquisition and third-party API licensing/redistribution constraints.

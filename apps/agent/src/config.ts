@@ -16,6 +16,7 @@ const AgentConfigSchema = z
       .max(64)
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/),
     WORKER_TOKEN: z.string().min(32).max(256),
+    DOCKER_SOCKET_PATH: z.string().startsWith('/').max(256).default('/var/run/docker.sock'),
     RECONNECT_BASE_DELAY_MS: positiveInteger(1_000, 250).pipe(z.number().max(60_000)),
     RECONNECT_MAX_DELAY_MS: positiveInteger(30_000, 250).pipe(z.number().max(300_000)),
     CONNECTION_TIMEOUT_MS: positiveInteger(10_000, 1_000).pipe(z.number().max(120_000)),
@@ -78,6 +79,7 @@ export interface AgentConfig {
   managerWsUrl: string;
   workerId: string;
   workerToken: string;
+  dockerSocketPath?: string;
   reconnectBaseDelayMs: number;
   reconnectMaxDelayMs: number;
   connectionTimeoutMs: number;
@@ -98,6 +100,7 @@ export function parseAgentConfig(env: NodeJS.ProcessEnv): AgentConfig {
     managerWsUrl: result.data.MANAGER_WS_URL,
     workerId: result.data.WORKER_ID,
     workerToken: result.data.WORKER_TOKEN,
+    dockerSocketPath: result.data.DOCKER_SOCKET_PATH,
     reconnectBaseDelayMs: result.data.RECONNECT_BASE_DELAY_MS,
     reconnectMaxDelayMs: result.data.RECONNECT_MAX_DELAY_MS,
     connectionTimeoutMs: result.data.CONNECTION_TIMEOUT_MS,

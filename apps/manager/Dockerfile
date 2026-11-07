@@ -27,6 +27,8 @@ RUN yarn install --production --frozen-lockfile --ignore-scripts
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/manager/dist apps/manager/dist
+COPY --from=build /app/apps/manager/migrations apps/manager/migrations
+COPY --from=build /app/apps/web/public apps/web/public
 EXPOSE 4000
 USER node
 CMD ["node", "apps/manager/dist/index.js"]

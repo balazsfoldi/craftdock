@@ -1,87 +1,65 @@
 # CraftDock
 
-Self-hosted Minecraft server management platform powered by Docker, with remote workers, modpack support, and a modern web dashboard.
+Self-hosted Minecraft Java Edition server management for one Windows Docker Desktop worker, controlled by a Raspberry Pi Manager. See the [Technical Specification](docs/CraftDock_SPECIFICATION_EN.md), [Architecture Decisions](docs/ARCHITECTURE_DECISIONS.md), and [Docker access ADR](docs/adr/0003-agent-docker-access.md).
 
-For detailed architecture, technical requirements, and the development roadmap, see the [Technical Specification](docs/CraftDock_SPECIFICATION_EN.md).
+## M1 — Core MVP
 
-## M0 architecture
+M1 provides a first administrator account and a web dashboard for creating, starting, stopping, monitoring, and deleting Vanilla Minecraft servers. Server and operation state is stored in PostgreSQL. The Agent runs on the Windows worker and manages containers through its local Docker socket. The Manager and Minecraft containers receive no Docker socket.
 
-M0 proves authenticated outbound connectivity between a Fastify Manager and a containerized Agent. The Agent opens a versioned WebSocket connection to the Manager, authenticates with its configured worker credential, and sends periodic heartbeats. The Manager exposes worker status at `GET /api/v1/workers` and `GET /api/v1/workers/{workerId}`. A configured worker appears as `OFFLINE` until it connects; status and heartbeat timestamps are in memory and reset when the Manager restarts.
-
-The Manager supports one preconfigured worker in M0. It does not access Docker, launch containers, or execute remote commands. The accepted scope defers the specification's `hello-world` container check and all Docker control beyond M0; a later milestone needs a separate Docker-access threat model and an explicit operation allowlist. See [ADR 0002](docs/adr/0002-m0-docker-scope.md).
+World data is kept in one named Docker volume per server. Deleting a server removes its managed container and frees its port. The world volume is retained unless the user explicitly confirms permanent deletion. If a Docker port collision occurs, CraftDock may recreate only its own managed container and preserve that world volume.
 
 ## Prerequisites
 
-- Node.js 22.13 or later and Yarn 1.22.22 for local builds and tests.
-- Docker Desktop with Linux containers for local Compose or the Windows Agent.
+- Node.js 22.13 or later and Yarn 1.22.22 for local builds.
+- Docker Desktop with Linux containers.
 - Docker Compose v2.
-- For remote deployments, a TLS reverse proxy that supports WebSocket upgrades and exposes the Manager over `wss://`. Keep the Manager's plain HTTP port on a trusted local interface.
+- For remote deployments, a TLS reverse proxy that supports WebSocket upgrades and exposes the Manager over `wss://`.
 
-## Local development
+## Run the local M1 stack
 
-Copy `.env.example` to `.env`, then replace `WORKER_TOKEN` with a randomly generated value of at least 32 characters. The same worker ID and token configure both services.
+From the repository root, create a private environment file and set fresh values for `WORKER_TOKEN`, `POSTGRES_PASSWORD`, and `ADMIN_PASSWORD`. Do not commit `.env`.
 
-```powershell
-Copy-Item .env.example .env
-docker compose up --build
+```bash
+cp .env.example .env
+openssl rand -hex 32  # set WORKER_TOKEN in .env
+openssl rand -hex 32  # set POSTGRES_PASSWORD in .env
+openssl rand -hex 32  # set ADMIN_PASSWORD in .env
 ```
 
-The Manager listens on `http://localhost:4000` and the Agent connects over the private Compose network. Check worker status:
+Start PostgreSQL, the Manager, and the Agent:
 
-```powershell
-Invoke-RestMethod http://localhost:4000/api/v1/workers
+```bash
+MSYS_NO_PATHCONV=1 docker compose --env-file .env -f docker/compose.local.yml up --build -d
+MSYS_NO_PATHCONV=1 docker compose --env-file .env -f docker/compose.local.yml ps
 ```
 
-To see offline detection and recovery, stop and start the Agent:
+Open `http://localhost:4000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The values bootstrap the first administrator only; Manager restarts do not reset its password.
 
-```powershell
-docker compose stop agent
-# After the configured timeout (45 seconds by default), check that status is OFFLINE.
-Invoke-RestMethod http://localhost:4000/api/v1/workers
-docker compose start agent
+For the Windows worker deployment, copy `apps/agent/.env.example` to `apps/agent/.env`, set the Manager WebSocket URL, worker ID, and shared token, then run:
+
+```bash
+MSYS_NO_PATHCONV=1 docker compose --env-file apps/agent/.env -f docker/compose.agent.windows.yml up --build -d
 ```
 
-Restarting only the Manager also exercises Agent recovery. The Manager reports the worker offline during its restart; the Agent reconnects with exponential backoff and restores `ONLINE` without a manual Agent restart.
-
-For local development without containers, install dependencies with `yarn install`, then run `yarn dev` from `apps/manager` and `apps/agent` in separate terminals. Configure the Agent URL as `ws://localhost:4000/api/v1/agent` and use `NODE_ENV=development`.
-
-## Environment variables
-
-| Variable                       | Used by           | Purpose                                                                 |
-| ------------------------------ | ----------------- | ----------------------------------------------------------------------- |
-| `WORKER_ID`                    | Manager and Agent | Stable configured worker identity                                       |
-| `WORKER_TOKEN`                 | Manager and Agent | Shared secret, at least 32 characters                                   |
-| `MANAGER_PORT`                 | Compose           | Host port for local Manager access                                      |
-| `MANAGER_HOST`, `MANAGER_PORT` | Manager           | Listen address and port                                                 |
-| `MANAGER_WS_URL`               | Agent             | WebSocket endpoint ending in `/api/v1/agent`                            |
-| `HEARTBEAT_INTERVAL_MS`        | Manager           | Interval requested by the Manager; defaults to 10 seconds               |
-| `WORKER_TIMEOUT_MS`            | Manager           | Time without a heartbeat before marking offline; defaults to 45 seconds |
-| `HEARTBEAT_SWEEP_INTERVAL_MS`  | Manager           | Offline detection polling interval; defaults to 5 seconds               |
-| `RECONNECT_BASE_DELAY_MS`      | Agent             | First retry delay; defaults to 1 second                                 |
-| `RECONNECT_MAX_DELAY_MS`       | Agent             | Retry delay cap; defaults to 30 seconds                                 |
-
-See `apps/manager/.env.example` and `apps/agent/.env.example` for standalone service examples. Remote production Agents require `MANAGER_WS_URL` to use `wss://`; provide the credential through a secret store or a protected, untracked environment file. Rotate the shared token by updating the Manager and Agent configuration together and restarting both services. Never paste it into logs, source control, or a URL.
-
-## Deployment examples
-
-- Raspberry Pi Manager: prepare the root `.env` file and run `docker compose -f docker/compose.pi.yml up --build -d`. The Manager binds to loopback so a host TLS reverse proxy can forward HTTPS and WebSocket traffic to it.
-- Windows Docker Desktop Agent: copy `apps/agent/.env.example` to `apps/agent/.env`, set the Manager's public `wss://` URL and matching worker credential, then run `docker compose -f docker/compose.agent.windows.yml up --build -d`.
-- The Pi example targets `linux/arm64`; the Windows Agent example targets `linux/amd64`. Neither service mounts the Docker socket.
+Only the trusted Agent container receives `/var/run/docker.sock`; the Engine API is not published over TCP. Docker socket access is effectively host-level privilege. Keep the Agent trusted and updated. Docker Desktop startup depends on Windows user-session behavior and is not guaranteed before login.
 
 ## Checks
 
-```powershell
+```bash
 yarn lint
 yarn typecheck
-yarn test
 yarn build
-docker compose config
+yarn format:check
+MSYS_NO_PATHCONV=1 docker compose --env-file .env -f docker/compose.local.yml config
+MSYS_NO_PATHCONV=1 docker compose --env-file .env -f docker/compose.pi.yml config
 ```
 
-## Known limitations
+## Current limitations
 
-- Worker registration and status are in memory; the Agent reauthenticates after a Manager restart.
-- M0 supports one preconfigured Agent and does not provide user authentication or RBAC.
-- Capabilities describe the Agent container runtime (for example, Linux under Docker Desktop), not detailed Windows host inventory.
-- Docker control, Minecraft lifecycle management, database persistence, and the web dashboard are later work.
-- The status endpoint has no authentication in M0 and should only be exposed on a trusted network or behind an appropriately configured reverse proxy.
+- M1 supports Vanilla Minecraft Java servers only.
+- A retained world volume after deletion remains on the worker for manual recovery; the UI has no undelete flow.
+- Lifecycle operations require the worker to be online. Desired and observed state are stored separately.
+- Exactly one Windows worker is supported.
+- Production WSS termination and worker-token rotation require deployment configuration.
+
+M2 is planned to add user management, per-server roles, audit history, and Minecraft console commands.

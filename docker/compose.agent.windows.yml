@@ -6,4 +6,8 @@ services:
       dockerfile: apps/agent/Dockerfile
     env_file:
       - ../apps/agent/.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - '0'
     restart: unless-stopped

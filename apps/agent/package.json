@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "@craftdock/protocol": "0.1.0",
+    "dockerode": "^5.0.1",
     "pino": "^9.6.0",
     "ws": "^8.18.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/dockerode": "^4.0.2",
     "tsx": "^4.19.2"
   }
 }

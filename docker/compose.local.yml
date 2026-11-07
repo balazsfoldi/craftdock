@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-craftdock}
+      POSTGRES_USER: ${POSTGRES_USER:-craftdock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the project .env file}
+    volumes:
+      - craftdock-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
   manager:
     build:
       context: ..
@@ -9,6 +25,10 @@ services:
       MANAGER_PORT: 4000
       WORKER_ID: ${WORKER_ID:?Set WORKER_ID in the project .env file}
       WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN in the project .env file}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-craftdock}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the project .env file}@postgres:5432/${POSTGRES_DB:-craftdock}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@craftdock.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in the project .env file}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:4000}
       HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-10000}
       WORKER_TIMEOUT_MS: ${WORKER_TIMEOUT_MS:-45000}
       HEARTBEAT_SWEEP_INTERVAL_MS: 5000
@@ -26,6 +46,9 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   agent:
     build:
@@ -39,7 +62,14 @@ services:
       RECONNECT_BASE_DELAY_MS: 1000
       RECONNECT_MAX_DELAY_MS: 30000
       LOG_LEVEL: info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - '0'
     depends_on:
       manager:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  craftdock-pgdata:

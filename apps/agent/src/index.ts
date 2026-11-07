@@ -1,11 +1,13 @@
 import pino from 'pino';
 import { parseAgentConfig } from './config.js';
+import { DockerControl } from './docker-control.js';
 import { runWithReconnect } from './reconnect.js';
 import { runAgentSession } from './session.js';
 
 async function main(): Promise<void> {
   const config = parseAgentConfig(process.env);
   const logger = pino({ level: config.logLevel });
+  const dockerControl = new DockerControl(config.dockerSocketPath ?? '/var/run/docker.sock');
   const controller = new AbortController();
 
   const shutdown = (signal: string): void => {
@@ -17,7 +19,8 @@ async function main(): Promise<void> {
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 
   await runWithReconnect(
-    (markConnected) => runAgentSession(config, logger, controller.signal, markConnected),
+    (markConnected) =>
+      runAgentSession(config, logger, controller.signal, markConnected, dockerControl),
     {
       signal: controller.signal,
       baseDelayMs: config.reconnectBaseDelayMs,
