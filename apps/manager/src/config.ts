@@ -17,6 +17,10 @@ const ManagerConfigSchema = z
       .max(64)
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/),
     WORKER_TOKEN: z.string().min(32).max(256),
+    DATABASE_URL: z.string().url(),
+    ADMIN_EMAIL: z.string().email().default('admin@craftdock.local'),
+    ADMIN_PASSWORD: z.string().min(14).max(1_024),
+    PUBLIC_ORIGIN: z.string().url().default('http://localhost:4000'),
     HEARTBEAT_INTERVAL_MS: positiveInteger(10_000, 1_000).pipe(z.number().max(300_000)),
     WORKER_TIMEOUT_MS: positiveInteger(45_000, 5_000).pipe(z.number().max(900_000)),
     HEARTBEAT_SWEEP_INTERVAL_MS: positiveInteger(5_000, 500).pipe(z.number().max(60_000)),
@@ -33,6 +37,13 @@ const ManagerConfigSchema = z
         path: ['WORKER_TIMEOUT_MS'],
       });
     }
+    if (config.NODE_ENV === 'production' && !config.PUBLIC_ORIGIN.startsWith('https://')) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUBLIC_ORIGIN must use https:// in production',
+        path: ['PUBLIC_ORIGIN'],
+      });
+    }
   });
 
 export interface ManagerConfig {
@@ -41,6 +52,10 @@ export interface ManagerConfig {
   port: number;
   workerId: string;
   workerToken: string;
+  databaseUrl?: string;
+  adminEmail?: string;
+  adminPassword?: string;
+  publicOrigin?: string;
   heartbeatIntervalMs: number;
   workerTimeoutMs: number;
   heartbeatSweepIntervalMs: number;
@@ -63,6 +78,10 @@ export function parseManagerConfig(env: NodeJS.ProcessEnv): ManagerConfig {
     port: result.data.MANAGER_PORT,
     workerId: result.data.WORKER_ID,
     workerToken: result.data.WORKER_TOKEN,
+    databaseUrl: result.data.DATABASE_URL,
+    adminEmail: result.data.ADMIN_EMAIL,
+    adminPassword: result.data.ADMIN_PASSWORD,
+    publicOrigin: result.data.PUBLIC_ORIGIN,
     heartbeatIntervalMs: result.data.HEARTBEAT_INTERVAL_MS,
     workerTimeoutMs: result.data.WORKER_TIMEOUT_MS,
     heartbeatSweepIntervalMs: result.data.HEARTBEAT_SWEEP_INTERVAL_MS,

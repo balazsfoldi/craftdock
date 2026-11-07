@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
+import { PROTOCOL_VERSION } from '@craftdock/protocol';
 import { buildManagerApp } from '../src/app.js';
 import type { ManagerConfig } from '../src/config.js';
 
@@ -96,7 +97,7 @@ describe('Manager worker API and protocol', () => {
     const authResponse = waitForMessage(socket);
     socket.send(
       JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         timestamp: new Date(now).toISOString(),
         type: 'agent.authenticate',
@@ -112,7 +113,7 @@ describe('Manager worker API and protocol', () => {
     monotonicNow += 2_000;
     const heartbeatId = randomUUID();
     const heartbeatPayload = JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: PROTOCOL_VERSION,
       messageId: heartbeatId,
       timestamp: new Date(now).toISOString(),
       type: 'agent.heartbeat',
@@ -148,7 +149,7 @@ describe('Manager worker API and protocol', () => {
     const invalidCredential = 'wrong-worker-secret-that-is-32-characters';
     socket.send(
       JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         timestamp: new Date(now).toISOString(),
         type: 'agent.authenticate',

@@ -1,4 +1,21 @@
 services:
+  postgres:
+    platform: linux/arm64
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-craftdock}
+      POSTGRES_USER: ${POSTGRES_USER:-craftdock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the project .env file}
+    volumes:
+      - craftdock-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
   manager:
     platform: linux/arm64
     build:
@@ -11,6 +28,10 @@ services:
       MANAGER_HOST: 0.0.0.0
       MANAGER_PORT: 4000
       HEARTBEAT_SWEEP_INTERVAL_MS: 5000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-craftdock}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the project .env file}@postgres:5432/${POSTGRES_DB:-craftdock}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@craftdock.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in the project .env file}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to the external HTTPS origin in the project .env file}
     ports:
       - '127.0.0.1:4000:4000'
     healthcheck:
@@ -24,3 +45,9 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  craftdock-pgdata:

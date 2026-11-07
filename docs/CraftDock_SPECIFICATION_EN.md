@@ -1,8 +1,8 @@
 # CraftDock — Technical Specification
 
-**Version:** 1.1 (M0 implementation decisions)
-**Date:** November 4, 2026
-**Status:** Approved design baseline with accepted M0 architecture decisions.
+**Version:** 1.2 (M1/M2 implementation scope)
+**Date:** November 5, 2026
+**Status:** Approved design baseline with accepted M0/M1/M2 decisions.
 
 ## 1. Purpose and Scope
 
@@ -43,7 +43,7 @@ The Agent establishes an **outbound, authenticated TLS/WebSocket connection** to
 
 - Windows 10/11 with Docker Desktop using the WSL2 backend in **Linux containers** mode.
 - `craftdock-agent` runs as a Linux container in Docker Desktop. Docker management is deferred beyond M0.
-- After M0, any Agent Docker access must use a deliberately scoped socket mount or secure local proxy. **Docker socket access effectively grants host-level control**; only trusted Agent code may access it, and the socket must never be published on the network. A separate threat model and explicit operation allowlist are required before implementation.
+- M1 gives only the trusted Agent container a local `/var/run/docker.sock` bind mount (ADR 0003). **Docker socket access effectively grants host-level control**; the Manager and Minecraft containers receive no socket, and the Engine API is never published on a network. The Agent may perform only validated, allowlisted CraftDock server operations. Verify socket permissions and the complete operation allowlist on the Windows Docker Desktop worker before deployment.
 - Primary Minecraft data storage uses Docker named volumes within Docker Desktop's Linux VM, or a tested WSL2-backed storage solution. Windows bind mounts are allowed only with explicit consideration of performance and permission trade-offs.
 - The dependency between Docker Desktop startup and Windows user login must be documented: **fully unattended startup after boot is not guaranteed**. Worker availability must be detected explicitly.
 - Docker restart policies may restart the Agent and servers when the Docker Engine becomes available.
@@ -71,7 +71,7 @@ Planned states: `DRAFT`, `PROVISIONING`, `STOPPED`, `STARTING`, `RUNNING`, `STOP
 - After a manager restart, containers are not blindly recreated. The Agent discovers existing containers using the `craftdock.serverId` Docker label.
 - At most one mutating operation may execute for a server at a time; commands are idempotent.
 - When the worker becomes unavailable, the server state is `UNKNOWN`; the system must not incorrectly claim that the server stopped.
-- World data survives container recreation. Destructive deletion requires separate confirmation.
+- World data survives container recreation. Deleting a server removes its managed container and releases its port. Keep the named volume by default; permanently deleting world data requires a separate explicit confirmation and a label-validated Agent operation.
 
 ## 7. Minecraft Installation and Compatibility
 
@@ -139,11 +139,18 @@ GET    /api/v1/servers/:id
 PATCH  /api/v1/servers/:id
 POST   /api/v1/servers/:id/start
 POST   /api/v1/servers/:id/stop
+DELETE /api/v1/servers/:id
+POST   /api/v1/servers/:id/commands
 POST   /api/v1/servers/:id/backups
 GET    /api/v1/servers/:id/operations
 GET    /api/v1/servers/:id/logs
-GET    /api/v1/modpacks/search
+GET    /api/v1/servers/:id/members
 POST   /api/v1/servers/:id/members
+GET    /api/v1/users
+POST   /api/v1/users
+PATCH  /api/v1/users/:userId
+GET    /api/v1/audit-events
+GET    /api/v1/modpacks/search
 ```
 
 Mutating operations return `202 Accepted` with an `operationId`. Clients observe progress through polling or an SSE/WebSocket stream. The API enforces object-level authorization for every server identifier.
@@ -159,6 +166,8 @@ Mutating operations return `202 Accepted` with an `operationId`. Clients observe
 ```
 
 Commands use versioned schemas. After reconnecting, the manager and Agent reconcile operations and observed Docker state using container labels. Heartbeats do not replace actual container inspection.
+
+The version 2 Agent protocol adds the fixed `server.delete` action. M2 adds `server.console` in protocol version 3. Console commands are single-line Minecraft input, limited to 512 characters, and are authorized by server role and recorded in the audit log. The Agent writes the command only to the stdin of the validated CraftDock Java server process; it never invokes a shell or accepts arbitrary Docker options. Existing M1 server containers are recreated on a later start to enable stdin while retaining their named world volume. A console operation with an uncertain result after a Manager or Agent disconnect is marked `COMMAND_RESULT_UNKNOWN` and is not replayed, because Minecraft console commands may not be idempotent.
 
 ## 12. Backup and Restore
 
@@ -207,11 +216,11 @@ Run the API on the Pi and a containerized Agent on the Windows PC. Establish aut
 
 ### M1 — Core MVP
 
-Create, start, and stop Vanilla servers; persist worlds; allocate ports; stream logs; provide one administrator account and a basic dashboard. Reconcile state after Pi and PC restarts.
+Create, start, stop, and delete Vanilla servers; persist worlds; allocate ports; stream logs; provide the first Platform Admin account and a basic dashboard. Deletion removes only the validated managed container and preserves its named world volume by default. Permanently deleting world data requires a distinct confirmation. Reconcile state after Pi and PC restarts.
 
 ### M2 — Multi-user Support
 
-Implement login, RBAC, server membership, audit logging, per-server permissions, and user management in the UI.
+Implement user login and password changes, Platform Admin user management, server membership, per-server Owner/Operator/Viewer permissions, and audit history in the UI. Add a Minecraft console input and live-log feedback for Platform Admins, Owners, and Operators. Console commands must use a dedicated versioned Agent operation, never an OS shell; viewers remain read-only.
 
 ### M3 — Runtime and Modpack Catalog
 
@@ -229,11 +238,11 @@ Complete deployment documentation, security review, integration/E2E testing, loa
 
 - **Unit:** state machine, RBAC matrix, port allocator, version resolver, command idempotency.
 - **Integration:** PostgreSQL migrations, Agent–Manager protocol, mocked Docker Engine and real test containers.
-- **End-to-end:** create servers in the UI; start/stop; console access; user permissions.
+- **End-to-end:** create servers in the UI; start/stop/delete; verify world retention and explicitly confirmed world deletion; submit Minecraft console commands; check user permissions and audit events.
 - **Fault injection:** kill Agent, restart Pi, make Docker Engine unavailable, interrupt downloads, occupy ports, fill disk.
 - **Security:** IDOR/RBAC, ZIP path traversal, oversized archives, token rotation, audit integrity.
 
-**Minimum MVP acceptance criteria:** (1) Manager and UI run on the Pi; (2) containerized Agent runs on Windows Docker Desktop; (3) authenticated remote container startup; (4) at least two Vanilla servers on separate ports; (5) worlds survive restarts; (6) PC-offline status is accurate; (7) Agent reconnect does not duplicate containers; (8) Docker API is not exposed publicly.
+**Minimum M1/M2 acceptance criteria:** (1) Manager and UI run on the Pi; (2) containerized Agent runs on Windows Docker Desktop; (3) authenticated remote container startup; (4) at least two Vanilla servers on separate ports; (5) worlds survive restarts and deletion retains data unless explicitly asked to remove it; (6) PC-offline status is accurate; (7) Agent reconnect does not duplicate containers or replay uncertain console commands; (8) Docker API is not exposed publicly; (9) a non-admin user can only see and operate servers permitted by membership; (10) audit events identify the actor and action without recording passwords or console arguments.
 
 **Minimum v1.0 acceptance criteria:** all five server types work with at least one documented compatible version; Modrinth and custom ZIP installation work; CurseForge integration supports legally permitted download workflows; multi-user RBAC works; LAN and at least one tunnel provider work; backup and restore work; automated recovery tests pass.
 

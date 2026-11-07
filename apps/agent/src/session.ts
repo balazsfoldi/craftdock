@@ -1,18 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import {
+  AgentCommandAckSchema,
+  AgentCommandResultSchema,
   AgentAuthenticateSchema,
   AgentHeartbeatSchema,
+  AgentServerLogSchema,
+  AgentServerSnapshotSchema,
+  createMessageMetadata,
   ManagerAuthResultSchema,
   ManagerMessageSchema,
   PROTOCOL_VERSION,
 } from '@craftdock/protocol';
-import type { HostCapabilities, ManagerMessage } from '@craftdock/protocol';
+import type { HostCapabilities, ManagerCommand, ManagerMessage } from '@craftdock/protocol';
 import type { Logger } from 'pino';
 import WebSocket from 'ws';
 import type { AgentConfig } from './config.js';
+import type { DockerControl } from './docker-control.js';
 
-const MAX_MESSAGE_BYTES = 16 * 1024;
+const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export function readRuntimeCapabilities(): HostCapabilities {
   return {
@@ -28,6 +34,7 @@ export function runAgentSession(
   logger: Logger,
   signal: AbortSignal,
   markConnected: () => void,
+  dockerControl?: DockerControl,
 ): Promise<void> {
   const socket = new WebSocket(config.managerWsUrl, {
     handshakeTimeout: config.connectionTimeoutMs,
@@ -40,6 +47,8 @@ export function runAgentSession(
     let settled = false;
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let authTimer: NodeJS.Timeout | null = null;
+    let snapshotCount = 0;
+    let commandQueue: Promise<void> = Promise.resolve();
 
     const cleanup = (): void => {
       if (heartbeatTimer) {
@@ -48,6 +57,7 @@ export function runAgentSession(
       if (authTimer) {
         clearTimeout(authTimer);
       }
+      dockerControl?.close();
       signal.removeEventListener('abort', abortSession);
     };
 
@@ -86,6 +96,112 @@ export function runAgentSession(
         workerId: config.workerId,
       });
       socket.send(JSON.stringify(heartbeat));
+      snapshotCount += 1;
+      if (dockerControl && snapshotCount % 3 === 0) {
+        void sendSnapshot().catch((error: unknown) => {
+          logger.warn(
+            {
+              workerId: config.workerId,
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+            },
+            'Unable to refresh Docker snapshot',
+          );
+        });
+      }
+    };
+
+    const sendMessage = (value: unknown): void => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(value));
+      }
+    };
+
+    const sendSnapshot = async (): Promise<void> => {
+      if (!dockerControl || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const snapshot = await dockerControl.snapshot();
+      if (snapshot.engineAvailable) {
+        try {
+          await dockerControl.syncLogStreams(snapshot.servers, (event) => {
+            if (!event.line) return;
+            sendMessage(
+              AgentServerLogSchema.parse({
+                ...createMessageMetadata(),
+                type: 'agent.server-log',
+                ...event,
+              }),
+            );
+          });
+        } catch (error) {
+          logger.warn(
+            { errorName: error instanceof Error ? error.name : 'UnknownError' },
+            'Unable to resume server log streams',
+          );
+        }
+      } else {
+        await dockerControl.syncLogStreams([], () => undefined);
+        logger.warn({ workerId: config.workerId }, 'Docker Engine is unavailable');
+      }
+      sendMessage(
+        AgentServerSnapshotSchema.parse({
+          ...createMessageMetadata(),
+          type: 'agent.server-snapshot',
+          workerId: config.workerId,
+          engineAvailable: snapshot.engineAvailable,
+          servers: snapshot.servers,
+        }),
+      );
+    };
+
+    const handleCommand = (command: ManagerCommand): void => {
+      commandQueue = commandQueue
+        .then(async () => {
+          if (!dockerControl) {
+            logger.warn(
+              { workerId: config.workerId },
+              'Manager sent a Docker command without an enabled Docker adapter',
+            );
+            return;
+          }
+          sendMessage(
+            AgentCommandAckSchema.parse({
+              ...createMessageMetadata(),
+              type: 'agent.command-ack',
+              commandId: command.commandId,
+              operationId: command.operationId,
+            }),
+          );
+          const result = await dockerControl.execute(command, (event) => {
+            if (!event.line) return;
+            sendMessage(
+              AgentServerLogSchema.parse({
+                ...createMessageMetadata(),
+                type: 'agent.server-log',
+                ...event,
+              }),
+            );
+          });
+          sendMessage(
+            AgentCommandResultSchema.parse({
+              ...createMessageMetadata(),
+              type: 'agent.command-result',
+              commandId: command.commandId,
+              operationId: command.operationId,
+              ...result,
+            }),
+          );
+          await sendSnapshot();
+        })
+        .catch((error: unknown) => {
+          logger.error(
+            {
+              workerId: config.workerId,
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+            },
+            'Failed to execute Docker operation',
+          );
+        });
     };
 
     socket.once('open', () => {
@@ -96,7 +212,7 @@ export function runAgentSession(
         type: 'agent.authenticate',
         workerId: config.workerId,
         credential: config.workerToken,
-        agentVersion: '0.1.0',
+        agentVersion: '0.2.0',
         capabilities: readRuntimeCapabilities(),
       });
       socket.send(JSON.stringify(authentication));
@@ -146,9 +262,18 @@ export function runAgentSession(
           authTimer = null;
         }
         markConnected();
-        logger.info({ workerId: config.workerId, agentVersion: '0.1.0' }, 'Connected to Manager');
+        logger.info({ workerId: config.workerId, agentVersion: '0.2.0' }, 'Connected to Manager');
         heartbeatTimer = setInterval(sendHeartbeat, result.data.heartbeatIntervalMs);
         sendHeartbeat();
+        void sendSnapshot().catch((error: unknown) => {
+          logger.warn(
+            {
+              workerId: config.workerId,
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+            },
+            'Unable to inspect Docker Engine',
+          );
+        });
         return;
       }
 
@@ -158,7 +283,7 @@ export function runAgentSession(
         socket.close(1008, 'Invalid protocol message');
         return;
       }
-      handleManagerMessage(message.data, logger, config.workerId, finish);
+      handleManagerMessage(message.data, logger, config.workerId, finish, handleCommand);
     });
 
     socket.once('close', () => {
@@ -185,6 +310,7 @@ function handleManagerMessage(
   logger: Logger,
   workerId: string,
   finish: (error?: Error) => void,
+  handleCommand: (command: ManagerCommand) => void,
 ): void {
   switch (message.type) {
     case 'manager.heartbeat-ack':
@@ -198,6 +324,9 @@ function handleManagerMessage(
       break;
     case 'manager.auth-result':
       finish(new Error('Manager sent an unexpected authentication result'));
+      break;
+    case 'manager.command':
+      handleCommand(message);
       break;
   }
 }

@@ -1,0 +1,960 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>CraftDock</title>
+    <style>
+      :root {
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        color: #e7edf5;
+        background: #101720;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 90% 0%, #1a3444 0, #101720 42rem);
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      .shell {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 2rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+      }
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 2.6rem;
+        height: 2.6rem;
+        border-radius: 0.8rem;
+        color: #07131a;
+        background: #72e0bb;
+        font-weight: 900;
+      }
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 1.25rem;
+        letter-spacing: -0.03em;
+      }
+      h2 {
+        font-size: 1.35rem;
+        letter-spacing: -0.03em;
+      }
+      .muted {
+        color: #9eacbc;
+      }
+      .panel,
+      .server {
+        border: 1px solid #293746;
+        border-radius: 1rem;
+        background: rgb(20 30 41 / 90%);
+        box-shadow: 0 18px 55px rgb(0 0 0 / 15%);
+      }
+      .panel {
+        padding: 1.4rem;
+        margin-bottom: 1.5rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+      label {
+        display: grid;
+        gap: 0.45rem;
+        color: #c6d2df;
+        font-size: 0.9rem;
+      }
+      input {
+        width: 100%;
+        padding: 0.75rem 0.85rem;
+        border: 1px solid #3a4b5c;
+        border-radius: 0.65rem;
+        color: #f4f7fb;
+        background: #111a23;
+      }
+      input:focus {
+        outline: 2px solid #72e0bb;
+        outline-offset: 1px;
+      }
+      .check {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.65rem;
+        margin: 1rem 0;
+        line-height: 1.45;
+      }
+      .check input {
+        width: auto;
+        margin-top: 0.25rem;
+        accent-color: #72e0bb;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        margin-top: 1rem;
+      }
+      .primary,
+      .secondary,
+      .quiet {
+        border: 0;
+        border-radius: 0.65rem;
+        padding: 0.7rem 1rem;
+        font-weight: 700;
+      }
+      .primary {
+        color: #07131a;
+        background: #72e0bb;
+      }
+      .secondary {
+        color: #e7edf5;
+        background: #334456;
+      }
+      .quiet {
+        color: #c6d2df;
+        background: transparent;
+      }
+      .danger {
+        color: #fff;
+        background: #9f3c3b;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #notice {
+        min-height: 1.5rem;
+        margin: 0.5rem 0 1rem;
+        color: #72e0bb;
+      }
+      #notice[data-error='true'] {
+        color: #ff9b91;
+      }
+      .server-list {
+        display: grid;
+        gap: 1rem;
+      }
+      .server {
+        padding: 1.2rem;
+      }
+      .server-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .server h3 {
+        margin: 0 0 0.35rem;
+        font-size: 1.05rem;
+      }
+      .server-meta {
+        color: #9eacbc;
+        font-size: 0.9rem;
+        line-height: 1.6;
+      }
+      .pill {
+        display: inline-flex;
+        padding: 0.25rem 0.55rem;
+        border-radius: 99px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        background: #334456;
+      }
+      .pill[data-state='RUNNING'] {
+        color: #07131a;
+        background: #72e0bb;
+      }
+      .pill[data-state='ERROR'] {
+        color: #24100e;
+        background: #ff9b91;
+      }
+      .logs {
+        height: 180px;
+        overflow: auto;
+        margin-top: 1rem;
+        padding: 0.8rem;
+        border-radius: 0.6rem;
+        color: #c3d4e5;
+        background: #0a1016;
+        font:
+          0.78rem/1.55 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .console-output {
+        min-height: 4rem;
+        max-height: 12rem;
+        overflow: auto;
+        margin-top: 0.75rem;
+        padding: 0.8rem;
+        border-radius: 0.6rem;
+        color: #c3d4e5;
+        background: #0a1016;
+        white-space: pre-wrap;
+      }
+      .member-list,
+      .user-list,
+      .audit-list {
+        display: grid;
+        gap: 0.65rem;
+        margin-top: 0.8rem;
+      }
+      .member-row,
+      .user-row,
+      .audit-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.65rem;
+        padding: 0.7rem;
+        border-radius: 0.6rem;
+        background: #101923;
+      }
+      .member-row form,
+      .user-row form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 0.5rem;
+      }
+      .member-row input,
+      .member-row select,
+      .user-row input,
+      .user-row select {
+        width: auto;
+        min-width: 8rem;
+      }
+      .audit-row {
+        align-items: flex-start;
+        color: #9eacbc;
+        font-size: 0.85rem;
+      }
+      .hidden {
+        display: none !important;
+      }
+      @media (max-width: 650px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        header {
+          align-items: flex-start;
+        }
+        .server-head {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div class="brand">
+          <div class="mark" aria-hidden="true">C</div>
+          <div>
+            <h1>CraftDock</h1>
+            <p class="muted">Minecraft server control</p>
+          </div>
+        </div>
+        <div id="account" class="muted"></div>
+      </header>
+
+      <section id="login" class="panel hidden" aria-labelledby="login-title">
+        <h2 id="login-title">Sign in</h2>
+        <p class="muted" style="margin: 0.45rem 0 1.2rem">
+          Use your CraftDock account.
+        </p>
+        <form id="login-form" class="grid">
+          <label
+            >Email<input name="email" type="email" autocomplete="username" required maxlength="254"
+          /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              maxlength="1024"
+          /></label>
+          <div class="actions"><button class="primary" type="submit">Sign in</button></div>
+        </form>
+      </section>
+
+      <div id="notice" role="status" aria-live="polite"></div>
+
+      <section id="dashboard" class="hidden">
+        <section class="panel">
+          <div class="server-head">
+            <div>
+              <h2>Worker</h2>
+              <p id="worker-status" class="muted" style="margin-top: 0.45rem">
+                Checking connection…
+              </p>
+            </div>
+            <button id="logout" class="quiet" type="button">Sign out</button>
+          </div>
+        </section>
+
+        <section id="account-settings" class="panel">
+          <h2>Change password</h2>
+          <form id="password-form" class="grid">
+            <label>Current password<input name="currentPassword" type="password" required maxlength="1024" autocomplete="current-password" /></label>
+            <label>New password<input name="newPassword" type="password" required minlength="14" maxlength="1024" autocomplete="new-password" /></label>
+            <div class="actions"><button class="secondary" type="submit">Update password</button></div>
+          </form>
+        </section>
+
+        <section id="admin-panel" class="panel hidden">
+          <h2>User management</h2>
+          <p class="muted">Create accounts and assign platform or server permissions.</p>
+          <form id="user-form" class="grid">
+            <label>Email<input name="email" type="email" required maxlength="254" /></label>
+            <label>Initial password<input name="password" type="password" required minlength="14" maxlength="1024" autocomplete="new-password" /></label>
+            <label>Platform role<select name="role"><option value="USER">User</option><option value="ADMIN">Platform admin</option></select></label>
+            <div class="actions"><button class="primary" type="submit">Create user</button></div>
+          </form>
+          <div id="users" class="user-list"></div>
+          <h3 style="margin-top: 1.5rem">Audit log</h3>
+          <div id="audit-events" class="audit-list"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="create-title">
+          <h2 id="create-title">Create a Vanilla server</h2>
+          <p class="muted" style="margin: 0.45rem 0 1rem">
+            World data stays in a named volume on the Windows worker. Ports are assigned
+            automatically.
+          </p>
+          <form id="create-form">
+            <div class="grid">
+              <label
+                >Server name<input name="name" required maxlength="64" placeholder="My server"
+              /></label>
+              <label
+                >Minecraft version<input
+                  name="minecraftVersion"
+                  required
+                  pattern="[0-9]+\.[0-9]+(\.[0-9]+)?"
+                  placeholder="1.21.4"
+              /></label>
+              <label
+                >Memory (MB)<input
+                  name="memoryMb"
+                  type="number"
+                  min="1024"
+                  max="8192"
+                  step="256"
+                  value="2048"
+                  required
+              /></label>
+              <label
+                >CPU limit<input
+                  name="cpuLimit"
+                  type="number"
+                  min="1"
+                  max="8"
+                  step="0.5"
+                  value="2"
+                  required
+              /></label>
+            </div>
+            <label class="check"
+              ><input name="acceptMinecraftEula" type="checkbox" required />I have read and agree to
+              the
+              <a href="https://www.minecraft.net/eula" target="_blank" rel="noreferrer"
+                >Minecraft EULA</a
+              >
+              for this server.</label
+            >
+            <div class="actions"><button class="primary" type="submit">Create server</button></div>
+          </form>
+        </section>
+
+        <section aria-labelledby="servers-title">
+          <div class="server-head" style="margin-bottom: 1rem">
+            <div>
+              <h2 id="servers-title">Servers</h2>
+              <p class="muted" style="margin-top: 0.4rem">
+                Desired state and worker observation are shown separately.
+              </p>
+            </div>
+            <button id="refresh" class="secondary" type="button">Refresh</button>
+          </div>
+          <div id="servers" class="server-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module">
+      const loginPanel = document.querySelector('#login');
+      const dashboard = document.querySelector('#dashboard');
+      const account = document.querySelector('#account');
+      const notice = document.querySelector('#notice');
+      const serversNode = document.querySelector('#servers');
+      let csrfToken = '';
+      let logStream = null;
+      let currentRole = 'USER';
+
+      function showNotice(message, isError = false) {
+        notice.textContent = message;
+        notice.dataset.error = String(isError);
+      }
+
+      async function api(path, options = {}) {
+        const headers = new Headers(options.headers || {});
+        if (options.body) headers.set('content-type', 'application/json');
+        if (options.method && options.method !== 'GET' && csrfToken)
+          headers.set('x-craftdock-csrf', csrfToken);
+        const response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
+        const result = response.status === 204 ? {} : await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error?.code || `HTTP_${response.status}`);
+        return result;
+      }
+
+      async function refreshSession() {
+        try {
+          const state = await api('/api/v1/auth/session');
+          loginPanel.classList.toggle('hidden', state.authenticated);
+          dashboard.classList.toggle('hidden', !state.authenticated);
+          account.textContent = state.authenticated ? `${state.email} · ${state.role}` : '';
+          currentRole = state.role || 'USER';
+          document.querySelector('#admin-panel').classList.toggle('hidden', currentRole !== 'ADMIN');
+          if (state.authenticated) {
+            csrfToken = (await api('/api/v1/auth/csrf')).csrfToken;
+            await refreshAll();
+          }
+        } catch (error) {
+          showNotice('Manager is unavailable. Refresh the page to retry.', true);
+        }
+      }
+
+      async function refreshAll() {
+        await Promise.all([refreshWorker(), refreshServers()]);
+        if (currentRole === 'ADMIN') await refreshAdminData();
+      }
+
+      async function refreshWorker() {
+        const result = await api('/api/v1/workers');
+        const worker = result.workers[0];
+        document.querySelector('#worker-status').textContent = worker
+          ? `${worker.workerId} · ${worker.status}${worker.lastSeenAt ? ` · last seen ${new Date(worker.lastSeenAt).toLocaleString()}` : ''}`
+          : 'No worker configured';
+      }
+
+      async function refreshServers() {
+        if (logStream) logStream.close();
+        logStream = null;
+        const result = await api('/api/v1/servers');
+        serversNode.replaceChildren();
+        if (!result.servers.length) {
+          const empty = document.createElement('p');
+          empty.className = 'muted';
+          empty.textContent = 'No servers yet. Create one to get started.';
+          serversNode.append(empty);
+          return;
+        }
+        for (const server of result.servers) renderServer(server);
+      }
+
+      function renderServer(server) {
+        const card = document.createElement('article');
+        card.className = 'server';
+        card.dataset.serverId = server.id;
+        const head = document.createElement('div');
+        head.className = 'server-head';
+        const details = document.createElement('div');
+        const title = document.createElement('h3');
+        title.textContent = server.name;
+        const meta = document.createElement('p');
+        meta.className = 'server-meta';
+        meta.textContent = `Vanilla ${server.minecraftVersion} · ${server.memoryMb} MB · ${server.cpuLimit} CPU · port ${server.hostPort} · desired ${server.desiredState} · observed ${server.observedState}`;
+        details.append(title, meta);
+        const badge = document.createElement('span');
+        badge.className = 'pill';
+        badge.dataset.state = server.observedState;
+        badge.textContent = server.observedState;
+        head.append(details, badge);
+        card.append(head);
+
+        const accessRole = currentRole === 'ADMIN' ? 'ADMIN' : server.accessRole;
+        const canOperate = accessRole === 'ADMIN' || accessRole === 'OWNER' || accessRole === 'OPERATOR';
+        const canManage = accessRole === 'ADMIN' || accessRole === 'OWNER';
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        if (canOperate) {
+          actions.append(
+            makeButton(
+              'Start',
+              'primary',
+              () => serverAction(server.id, 'start'),
+              server.desiredState === 'RUNNING',
+            ),
+            makeButton(
+              'Stop',
+              'secondary',
+              () => serverAction(server.id, 'stop'),
+              server.desiredState === 'STOPPED',
+            ),
+          );
+        }
+        actions.append(makeButton('Show logs', 'quiet', () => openLogs(server.id), false));
+        if (canManage) {
+          actions.append(makeButton('Members', 'quiet', () => openMembers(server.id), false));
+          actions.append(makeButton('Delete server', 'danger', () => deleteServer(server), false));
+        }
+        card.append(actions);
+
+        if (canOperate) {
+          const consoleForm = document.createElement('form');
+          consoleForm.className = 'actions';
+          const commandInput = document.createElement('input');
+          commandInput.name = 'command';
+          commandInput.required = true;
+          commandInput.maxLength = 512;
+          commandInput.placeholder = 'gamemode creative playername';
+          commandInput.setAttribute('aria-label', 'Minecraft console command');
+          const send = document.createElement('button');
+          send.type = 'submit';
+          send.className = 'secondary';
+          send.textContent = 'Send command';
+          consoleForm.append(commandInput, send);
+          consoleForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            void sendConsoleCommand(server.id, commandInput.value);
+          });
+          card.append(consoleForm);
+        }
+        const logs = document.createElement('pre');
+        logs.className = 'logs hidden';
+        logs.setAttribute('aria-label', `${server.name} live logs`);
+        logs.dataset.serverId = server.id;
+        card.append(logs);
+        serversNode.append(card);
+      }
+
+      function makeButton(label, className, action, disabled) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className;
+        button.textContent = label;
+        button.disabled = disabled;
+        button.addEventListener('click', action);
+        return button;
+      }
+
+      async function openMembers(serverId) {
+        const card = document.querySelector(`.server[data-server-id="${CSS.escape(serverId)}"]`);
+        if (!card) return;
+        const oldPanel = card.querySelector('.members-panel');
+        if (oldPanel) {
+          oldPanel.remove();
+          return;
+        }
+        const panel = document.createElement('section');
+        panel.className = 'members-panel';
+        const heading = document.createElement('h4');
+        heading.textContent = 'Server members';
+        const form = document.createElement('form');
+        form.className = 'actions';
+        const email = document.createElement('input');
+        email.type = 'email';
+        email.required = true;
+        email.maxLength = 254;
+        email.placeholder = 'Existing user email';
+        email.setAttribute('aria-label', 'Member email');
+        const role = roleSelect('OPERATOR');
+        const add = document.createElement('button');
+        add.type = 'submit';
+        add.className = 'secondary';
+        add.textContent = 'Add or update member';
+        form.append(email, role, add);
+        const list = document.createElement('div');
+        list.className = 'member-list';
+        panel.append(heading, form, list);
+        card.append(panel);
+
+        async function refreshMembers() {
+          const result = await api(`/api/v1/servers/${serverId}/members`);
+          list.replaceChildren();
+          for (const member of result.members) {
+            const row = document.createElement('div');
+            row.className = 'member-row';
+            const label = document.createElement('span');
+            label.textContent = `${member.email} · ${member.role}`;
+            const remove = makeButton(
+              'Remove',
+              'quiet',
+              async () => {
+                try {
+                  await api(`/api/v1/servers/${serverId}/members/${member.userId}`, {
+                    method: 'DELETE',
+                    body: '{}',
+                  });
+                  await refreshMembers();
+                } catch (error) {
+                  showNotice(humanError(error), true);
+                }
+              },
+              false,
+            );
+            row.append(label, remove);
+            list.append(row);
+          }
+        }
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          try {
+            await api(`/api/v1/servers/${serverId}/members`, {
+              method: 'POST',
+              body: JSON.stringify({ email: email.value, role: role.value }),
+            });
+            email.value = '';
+            await refreshMembers();
+            showNotice('Member permissions saved.');
+          } catch (error) {
+            showNotice(humanError(error), true);
+          }
+        });
+        await refreshMembers().catch((error) => showNotice(humanError(error), true));
+      }
+
+      function roleSelect(value) {
+        const select = document.createElement('select');
+        select.setAttribute('aria-label', 'Server role');
+        for (const [role, label] of [
+          ['OWNER', 'Owner'],
+          ['OPERATOR', 'Operator'],
+          ['VIEWER', 'Viewer'],
+        ]) {
+          const option = document.createElement('option');
+          option.value = role;
+          option.textContent = label;
+          select.append(option);
+        }
+        select.value = value;
+        return select;
+      }
+
+      async function deleteServer(server) {
+        const confirmation = window.prompt(
+          `Type ${server.name} to confirm server deletion. World data will be kept unless you choose permanent deletion next.`,
+        );
+        if (confirmation !== server.name) return;
+        const deleteWorld = window.confirm(
+          'Permanently delete this server’s world data too? Choose Cancel to keep the named volume.',
+        );
+        try {
+          const { operation } = await api(`/api/v1/servers/${server.id}`, {
+            method: 'DELETE',
+            headers: { 'idempotency-key': crypto.randomUUID() },
+            body: JSON.stringify({ deleteWorld }),
+          });
+          showNotice('Deleting server…');
+          await waitForOperation(operation.id);
+          showNotice(
+            deleteWorld
+              ? 'Server and world data deleted.'
+              : `Server deleted; world data remains in volume craftdock-server-${server.id}.`,
+          );
+          await refreshAll();
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      }
+
+      async function sendConsoleCommand(serverId, command) {
+        try {
+          const { operation } = await api(`/api/v1/servers/${serverId}/commands`, {
+            method: 'POST',
+            headers: { 'idempotency-key': crypto.randomUUID() },
+            body: JSON.stringify({ command }),
+          });
+          showNotice('Sending Minecraft console command…');
+          await waitForOperation(operation.id);
+          showNotice('Command sent. Check the live server logs for its response.');
+          openLogs(serverId);
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      }
+
+      async function refreshAdminData() {
+        const [{ users }, { events }] = await Promise.all([
+          api('/api/v1/users'),
+          api('/api/v1/audit-events'),
+        ]);
+        const usersNode = document.querySelector('#users');
+        usersNode.replaceChildren();
+        for (const user of users) {
+          const row = document.createElement('div');
+          row.className = 'user-row';
+          const identity = document.createElement('strong');
+          identity.textContent = user.email;
+          const form = document.createElement('form');
+          const role = document.createElement('select');
+          for (const [value, label] of [['USER', 'User'], ['ADMIN', 'Platform admin']]) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            role.append(option);
+          }
+          role.value = user.role;
+          role.setAttribute('aria-label', `Platform role for ${user.email}`);
+          const status = document.createElement('select');
+          for (const value of ['ACTIVE', 'DISABLED']) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value === 'ACTIVE' ? 'Active' : 'Disabled';
+            status.append(option);
+          }
+          status.value = user.status;
+          status.setAttribute('aria-label', `Account status for ${user.email}`);
+          const password = document.createElement('input');
+          password.type = 'password';
+          password.minLength = 14;
+          password.maxLength = 1024;
+          password.placeholder = 'New password (optional)';
+          password.setAttribute('aria-label', `Reset password for ${user.email}`);
+          const save = document.createElement('button');
+          save.type = 'submit';
+          save.className = 'secondary';
+          save.textContent = 'Save';
+          form.append(role, status, password, save);
+          form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            try {
+              await api(`/api/v1/users/${user.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  role: role.value,
+                  status: status.value,
+                  ...(password.value ? { password: password.value } : {}),
+                }),
+              });
+              password.value = '';
+              await refreshAdminData();
+              showNotice('User account updated.');
+            } catch (error) {
+              showNotice(humanError(error), true);
+            }
+          });
+          row.append(identity, form);
+          usersNode.append(row);
+        }
+        const auditNode = document.querySelector('#audit-events');
+        auditNode.replaceChildren();
+        for (const item of events) {
+          const row = document.createElement('div');
+          row.className = 'audit-row';
+          row.textContent = `${new Date(item.createdAt).toLocaleString()} · ${item.actorEmail || 'System'} · ${item.action} · ${item.targetType}${item.targetId ? ` ${item.targetId}` : ''} · ${JSON.stringify(item.metadata)}`;
+          auditNode.append(row);
+        }
+      }
+
+      async function waitForOperation(operationId) {
+        for (let attempt = 0; attempt < 900; attempt += 1) {
+          const { operation } = await api(`/api/v1/operations/${operationId}`);
+          if (operation.status === 'SUCCEEDED') return;
+          if (operation.status === 'FAILED')
+            throw new Error(operation.errorCode || 'OPERATION_FAILED');
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        throw new Error('OPERATION_TIMEOUT');
+      }
+
+      async function serverAction(serverId, action) {
+        try {
+          const { operation } = await api(`/api/v1/servers/${serverId}/${action}`, {
+            method: 'POST',
+            headers: { 'idempotency-key': crypto.randomUUID() },
+            body: '{}',
+          });
+          showNotice(`${action === 'start' ? 'Starting' : 'Stopping'} server…`);
+          await waitForOperation(operation.id);
+          showNotice('Operation completed.');
+          await refreshAll();
+        } catch (error) {
+          showNotice(humanError(error), true);
+          await refreshAll().catch(() => undefined);
+        }
+      }
+
+      async function openLogs(serverId) {
+        if (logStream) logStream.close();
+        document.querySelectorAll('.logs').forEach((node) => {
+          node.classList.add('hidden');
+          node.textContent = '';
+        });
+        const node = document.querySelector(`.logs[data-server-id="${serverId}"]`);
+        node.classList.remove('hidden');
+        logStream = new EventSource(`/api/v1/servers/${serverId}/logs`);
+        logStream.addEventListener('log', (event) => {
+          const entry = JSON.parse(event.data);
+          node.textContent += `[${new Date(entry.timestamp).toLocaleTimeString()}] ${entry.line}\n`;
+          const lines = node.textContent.split('\n');
+          if (lines.length > 500) node.textContent = lines.slice(-500).join('\n');
+          node.scrollTop = node.scrollHeight;
+        });
+        logStream.onerror = () =>
+          showNotice('Log stream disconnected. Check worker status and reopen logs.', true);
+      }
+
+      function humanError(error) {
+        const messages = {
+          INVALID_CREDENTIALS: 'Email or password is incorrect.',
+          UNAUTHENTICATED: 'Please sign in again.',
+          FORBIDDEN: 'Your account does not have permission for this action.',
+          OPERATION_IN_PROGRESS: 'This server already has an operation in progress.',
+          SERVER_NOT_RUNNING: 'Start the server before sending a console command.',
+          CONSOLE_UNAVAILABLE: 'Stop and start this server once to enable console commands.',
+          INVALID_CONSOLE_COMMAND: 'Enter one Minecraft console command on a single line.',
+          USER_ALREADY_EXISTS: 'An account with this email already exists.',
+          USER_NOT_FOUND: 'The user was not found or is disabled.',
+          LAST_ADMIN_REQUIRED: 'At least one active platform administrator is required.',
+          LAST_SERVER_OWNER_REQUIRED: 'Assign another owner before removing the last owner.',
+          MEMBER_NOT_FOUND: 'That user is not a member of this server.',
+          COMMAND_RESULT_UNKNOWN:
+            'CraftDock could not confirm whether the command ran. Check the server before retrying.',
+          PORT_IN_USE: 'The assigned port is already in use on the worker.',
+          PORT_RANGE_EXHAUSTED: 'No ports remain in the configured range.',
+          OPERATION_TIMEOUT:
+            'The operation is taking too long. Check the server state and worker logs.',
+        };
+        return messages[error.message] || `Operation failed: ${error.message}`;
+      }
+
+      document.querySelector('#login-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        try {
+          await api('/api/v1/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
+          });
+          formElement.reset();
+          showNotice('Signed in.');
+          await refreshSession();
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      });
+
+      document.querySelector('#create-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        try {
+          const result = await api('/api/v1/servers', {
+            method: 'POST',
+            headers: { 'idempotency-key': crypto.randomUUID() },
+            body: JSON.stringify({
+              name: form.get('name'),
+              minecraftVersion: form.get('minecraftVersion'),
+              memoryMb: Number(form.get('memoryMb')),
+              cpuLimit: Number(form.get('cpuLimit')),
+              acceptMinecraftEula: form.get('acceptMinecraftEula') === 'on',
+            }),
+          });
+          showNotice('Creating server and preparing its persistent world volume…');
+          await waitForOperation(result.operation.id);
+          formElement.reset();
+          formElement.elements.memoryMb.value = '2048';
+          formElement.elements.cpuLimit.value = '2';
+          showNotice(`Server created on port ${result.server.hostPort}.`);
+          await refreshAll();
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      });
+
+      document.querySelector('#password-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        try {
+          await api('/api/v1/auth/password', {
+            method: 'POST',
+            body: JSON.stringify({
+              currentPassword: form.get('currentPassword'),
+              newPassword: form.get('newPassword'),
+            }),
+          });
+          formElement.reset();
+          showNotice('Password updated.');
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      });
+
+      document.querySelector('#user-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formElement = event.currentTarget;
+        const form = new FormData(formElement);
+        try {
+          await api('/api/v1/users', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: form.get('email'),
+              password: form.get('password'),
+              role: form.get('role'),
+            }),
+          });
+          formElement.reset();
+          await refreshAdminData();
+          showNotice('User account created.');
+        } catch (error) {
+          showNotice(humanError(error), true);
+        }
+      });
+
+      document.querySelector('#logout').addEventListener('click', async () => {
+        try {
+          await api('/api/v1/auth/logout', { method: 'POST', body: '{}' });
+        } catch {
+          /* Cookie expiry still clears access. */
+        }
+        if (logStream) logStream.close();
+        csrfToken = '';
+        await refreshSession();
+      });
+      document
+        .querySelector('#refresh')
+        .addEventListener('click', () =>
+          refreshAll().catch((error) => showNotice(humanError(error), true)),
+        );
+      await refreshSession();
+    </script>
+  </body>
+</html>
